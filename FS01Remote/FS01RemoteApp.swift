@@ -10,30 +10,142 @@ struct FS01RemoteApp: App {
         WindowGroup {
             NavigationStack {
                 List {
-                    Section("红外发射器") {
-                        LabeledContent("设备", value: "FS01")
-                        LabeledContent("状态", value: remote.connectionStatus)
-                        Button("搜索并连接", action: remote.connect)
-                            .disabled(!remote.canConnect)
-                        if let result = remote.lastResult {
-                            Text(result)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                    if let catalog = InfraredCatalog.entries {
+                        ForEach(catalog.keys.sorted(), id: \.self) { category in
+                            NavigationLink {
+                                BrandList(category: category, brands: catalog[category] ?? [:], remote: remote)
+                            } label: {
+                                Label(InfraredCatalog.title(for: category), systemImage: category == "TVs" ? "tv" : "remote")
+                            }
                         }
-                    }
-                    Section("电视") {
-                        ForEach(RemoteCommand.allCases) { command in
-                            Button(command.rawValue) { remote.send(command) }
-                                .disabled(!remote.canSend)
+                    } else {
+                        NavigationLink("电视") {
+                            BrandList(category: "TVs", brands: [:], remote: remote)
                         }
-                    }
-                    Section {
-                        Text("这三个按钮使用从原 App 抓到的指令，按键名称需用电视实测确认。")
+                        Text("公开码库目录读取失败。")
                     }
                 }
-                .navigationTitle("FS01 红外遥控")
+                .navigationTitle("选择电器类型")
             }
         }
+    }
+}
+
+private enum InfraredCatalog {
+    typealias Brands = [String: [String]]
+    static let revision = "c33f37e6f75836b5d1894a95c04778d93bae51e7"
+    static let entries: [String: Brands]? = {
+        guard let url = Bundle.main.url(forResource: "InfraredCatalog", withExtension: "json"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode([String: Brands].self, from: data)
+    }()
+
+    static func title(for category: String) -> String {
+        let names = [
+            "ACs": "空调", "TVs": "电视", "Air_Purifiers": "空气净化器", "Fans": "风扇",
+            "Cable_Boxes": "机顶盒", "DVD_Players": "DVD 播放器", "Blu-Ray": "蓝光播放器",
+            "Cameras": "相机", "Projectors": "投影仪", "Audio_and_Video_Receivers": "功放",
+            "Humidifiers": "加湿器", "Heaters": "电暖器", "Vacuum_Cleaners": "吸尘器与扫地机器人",
+            "LED_Lighting": "灯具", "SoundBars": "条形音响", "Streaming_Devices": "流媒体播放器"
+        ]
+        return names[category] ?? display(category)
+    }
+
+    static func display(_ value: String) -> String {
+        value.replacingOccurrences(of: "_", with: " ")
+    }
+
+    static func source(category: String, brand: String, model: String) -> URL {
+        URL(string: "https://github.com/UberGuidoZ/Flipper-IRDB/blob/\(revision)")!
+            .appendingPathComponent(category)
+            .appendingPathComponent(brand)
+            .appendingPathComponent(model + ".ir")
+    }
+}
+
+private struct BrandList: View {
+    let category: String
+    let brands: InfraredCatalog.Brands
+    @ObservedObject var remote: FS01Remote
+    @State private var query = ""
+
+    var body: some View {
+        List {
+            if category == "TVs", query.isEmpty {
+                Section("可以控制") {
+                    NavigationLink("已验证的电视") {
+                        VerifiedTVRemote(remote: remote)
+                    }
+                }
+            }
+            Section("公开码库 · 待适配") {
+                ForEach(brands.keys.sorted().filter {
+                    query.isEmpty || InfraredCatalog.display($0).localizedCaseInsensitiveContains(query)
+                }, id: \.self) { brand in
+                    NavigationLink(InfraredCatalog.display(brand)) {
+                        if let models = brands[brand] {
+                            if models.count == 1, let model = models.first {
+                                CatalogRemote(category: category, brand: brand, model: model)
+                            } else {
+                                List(models, id: \.self) { model in
+                                    NavigationLink(InfraredCatalog.display(model)) {
+                                        CatalogRemote(category: category, brand: brand, model: model)
+                                    }
+                                }
+                                .navigationTitle("选择型号")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .searchable(text: $query, prompt: "搜索品牌")
+        .navigationTitle(InfraredCatalog.title(for: category) + " · 选择品牌")
+    }
+}
+
+private struct CatalogRemote: View {
+    let category: String
+    let brand: String
+    let model: String
+
+    var body: some View {
+        List {
+            LabeledContent("品牌", value: InfraredCatalog.display(brand))
+            LabeledContent("型号", value: InfraredCatalog.display(model))
+            Section("发码状态") {
+                Text("公开码库已有此型号。FS01 的指令转换尚未验证，此型号暂时无法控制。")
+                Link("查看原始红外码", destination: InfraredCatalog.source(category: category, brand: brand, model: model))
+            }
+        }
+        .navigationTitle("遥控器")
+    }
+}
+
+private struct VerifiedTVRemote: View {
+    @ObservedObject var remote: FS01Remote
+
+    var body: some View {
+        List {
+            Section("红外发射器") {
+                LabeledContent("设备", value: "FS01")
+                LabeledContent("状态", value: remote.connectionStatus)
+                Button("搜索并连接", action: remote.connect)
+                    .disabled(!remote.canConnect)
+                if let result = remote.lastResult {
+                    Text(result)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("电视") {
+                ForEach(RemoteCommand.allCases) { command in
+                    Button(command.rawValue) { remote.send(command) }
+                        .disabled(!remote.canSend)
+                }
+            }
+        }
+        .navigationTitle("电视遥控")
     }
 }
 
