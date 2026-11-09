@@ -90,12 +90,12 @@
             isa = XCBuildConfiguration;
             buildSettings = {
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 5;
+                CURRENT_PROJECT_VERSION = 6;
                 GENERATE_INFOPLIST_FILE = YES;
                 INFOPLIST_KEY_CFBundleDisplayName = "FS01 遥控";
                 INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "连接你的 FS01 红外发射器以发送电视遥控指令。";
                 INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-                MARKETING_VERSION = 0.2.2;
+                MARKETING_VERSION = 0.2.3;
                 PRODUCT_BUNDLE_IDENTIFIER = local.fs01.remote;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;

@@ -283,8 +283,8 @@ private struct BrandList: View {
                         RemotePad(
                             type: type,
                             title: InfraredCatalog.brandName(brand),
-                            setCount: brands[brand]?.count ?? 0,
-                            verified: false,
+                            setCount: (brands[brand]?.count ?? 0) + (type == .television && brand == "Sony" ? 1 : 0),
+                            verified: type == .television && brand == "Sony",
                             remote: remote
                         )
                     }
@@ -304,6 +304,8 @@ private struct RemotePad: View {
     @ObservedObject var remote: FS01Remote
     @State private var selectedSet = 0
 
+    private var canTestSet: Bool { verified && selectedSet == 0 }
+
     var body: some View {
         List {
             Section("码组") {
@@ -312,12 +314,12 @@ private struct RemotePad: View {
                     selectedSet = (selectedSet + 1) % setCount
                 }
                 .disabled(setCount < 2)
-                if !verified {
-                    Text("此品牌的码组尚未适配 FS01，暂时只能切换预览。")
+                if !canTestSet {
+                    Text("这一套码组尚未适配 FS01，暂时只能切换预览。")
                         .foregroundStyle(.secondary)
                 }
             }
-            if verified {
+            if canTestSet {
                 Section("红外发射器") {
                     LabeledContent("状态", value: remote.connectionStatus)
                     Button("搜索并连接", action: remote.connect)
@@ -332,7 +334,7 @@ private struct RemotePad: View {
             Section("遥控按键") {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
                     ForEach(type.buttons, id: \.self) { label in
-                        let command = verified ? RemoteCommand(rawValue: label) : nil
+                        let command = canTestSet ? RemoteCommand(rawValue: label) : nil
                         Button {
                             if let command { remote.send(command) }
                         } label: {
@@ -355,6 +357,8 @@ enum RemoteCommand: String, CaseIterable, Identifiable {
     case volumeUp = "音量加"
     case volumeDown = "音量减"
     case mute = "静音"
+    case power = "电源"
+    case channelUp = "频道加"
 
     var id: Self { self }
 
@@ -373,6 +377,20 @@ enum RemoteCommand: String, CaseIterable, Identifiable {
                 0x01, 0x28, 0x49, 0x28, 0x23, 0x28, 0x23, 0xd1, 0x0c, 0x01, 0x12, 0x21,
                 0x22, 0x12, 0x22, 0x30, 0x11, 0x22, 0x12, 0x21, 0x22, 0x23, 0x01, 0x12,
                 0x21, 0x22, 0x12, 0x22, 0x30, 0x11, 0x22, 0x12, 0x21, 0x22, 0x23
+            ])
+        case .power:
+            Data([
+                0x14, 0x00, 0x2d, 0x39, 0x00, 0x29, 0x4c, 0x33, 0x26, 0xc5, 0x0a, 0x94,
+                0x01, 0x28, 0x49, 0x28, 0x23, 0x28, 0x23, 0xd0, 0x0c, 0x01, 0x21, 0x21,
+                0x22, 0x12, 0x22, 0x30, 0x12, 0x12, 0x12, 0x21, 0x22, 0x23, 0x01, 0x21,
+                0x21, 0x22, 0x12, 0x22, 0x30, 0x12, 0x12, 0x12, 0x21, 0x22, 0x23
+            ])
+        case .channelUp:
+            Data([
+                0x14, 0x00, 0x8f, 0x26, 0x00, 0x29, 0x4c, 0x33, 0x26, 0xc5, 0x0a, 0x94,
+                0x01, 0x28, 0x23, 0x28, 0x49, 0x28, 0x23, 0x9c, 0x0d, 0x01, 0x11, 0x12,
+                0x11, 0x21, 0x11, 0x30, 0x11, 0x11, 0x21, 0x12, 0x11, 0x13, 0x01, 0x11,
+                0x12, 0x11, 0x21, 0x11, 0x30, 0x11, 0x11, 0x21, 0x12, 0x11, 0x13
             ])
         case .mute:
             Data([
