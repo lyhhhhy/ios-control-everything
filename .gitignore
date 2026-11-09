@@ -1,0 +1,12 @@
+/data/
+*.pklg
+*.pcap
+*.pcapng
+*.tar.gz
+*.mobileconfig
+*.ipa
+/DerivedData/
+/dist/
+/FS01Remote-build-source.zip
+xcuserdata/
+.DS_Store
