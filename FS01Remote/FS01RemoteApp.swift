@@ -157,12 +157,12 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard self.peripheral === peripheral else { return }
         connectionStatus = "正在查找发码特征"
-        peripheral.discoverServices([serviceID])
+        peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard self.peripheral === peripheral else { return }
-        fail(error?.localizedDescription ?? "连接失败")
+        fail("建立蓝牙连接失败：\(error?.localizedDescription ?? "无详细信息")")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -172,36 +172,40 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard self.peripheral === peripheral else { return }
-        guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == serviceID }) else {
-            fail(error?.localizedDescription ?? "没有找到 FFF0 服务。")
+        let services = peripheral.services ?? []
+        guard let service = services.first(where: { $0.uuid == serviceID }) else {
+            let discovered = services.map { $0.uuid.uuidString }.joined(separator: ", ")
+            fail("找不到 FFF0 服务。已发现：\(discovered.isEmpty ? "无" : discovered)。\(error?.localizedDescription ?? "")")
             return
         }
-        peripheral.discoverCharacteristics([commandID], for: service)
+        connectionStatus = "正在查找 FFF2 特征"
+        peripheral.discoverCharacteristics(nil, for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard self.peripheral === peripheral else { return }
-        guard error == nil,
-              let characteristic = service.characteristics?.first(where: { $0.uuid == commandID }),
-              characteristic.properties.contains(.write),
-              characteristic.properties.contains(.notify) else {
-            fail(error?.localizedDescription ?? "没有找到可写入并接收通知的 FFF2 特征。")
+        let characteristics = service.characteristics ?? []
+        guard let characteristic = characteristics.first(where: { $0.uuid == commandID }),
+              characteristic.properties.contains(.write) else {
+            let discovered = characteristics.map { $0.uuid.uuidString }.joined(separator: ", ")
+            fail("找不到可写入的 FFF2 特征。已发现：\(discovered.isEmpty ? "无" : discovered)。\(error?.localizedDescription ?? "")")
             return
         }
         commandCharacteristic = characteristic
-        peripheral.setNotifyValue(true, for: characteristic)
-    }
-
-    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        guard self.peripheral === peripheral, characteristic === commandCharacteristic else { return }
-        guard error == nil, characteristic.isNotifying else {
-            fail(error?.localizedDescription ?? "无法订阅红外头回包。")
-            return
-        }
         connectionTimeout?.cancel()
         connectionTimeout = nil
         connectionStatus = "已连接"
         ready = true
+        if characteristic.properties.contains(.notify) {
+            peripheral.setNotifyValue(true, for: characteristic)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard self.peripheral === peripheral, characteristic === commandCharacteristic else { return }
+        if let error {
+            lastResult = "回包订阅失败，仍可试发：\(error.localizedDescription)"
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
