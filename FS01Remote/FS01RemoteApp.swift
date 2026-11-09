@@ -34,14 +34,6 @@ private enum ApplianceType: String, CaseIterable, Identifiable {
     var id: Self { self }
     var title: String { self == .television ? "电视" : "空调" }
 
-    var buttons: [String] {
-        switch self {
-        case .television:
-            ["电源", "信号源", "静音", "音量加", "频道加", "菜单", "音量减", "频道减", "返回"]
-        case .airConditioner:
-            ["电源", "模式", "风速", "温度加", "温度减", "扫风"]
-        }
-    }
 }
 
 private enum InfraredCatalog {
@@ -331,37 +323,113 @@ private struct RemotePad: View {
                     }
                 }
             }
-            if canTestSet {
-                Section("发码实验 · 每次预期音量加") {
-                    Text("先用正常的音量加确认连接，再分别试 A、B、C。每次看电视音量有没有升高。")
-                        .font(.footnote)
-                    ForEach(PacketProbe.allCases) { probe in
-                        Button(probe.rawValue) {
-                            remote.send(payload: probe.payload, label: probe.rawValue)
-                        }
-                        .disabled(!remote.canSend)
+            if type == .television {
+                Section("电视控制") {
+                    HStack(spacing: 8) {
+                        tvKey("电源")
+                        tvKey("信号源")
+                        tvKey("静音")
+                    }
+                    if canTestSet {
+                        Text("灰色按键的红外指令尚未适配。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
-            }
-            Section("遥控按键") {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
-                    ForEach(type.buttons, id: \.self) { label in
-                        let command = canTestSet ? RemoteCommand(rawValue: label) : nil
-                        Button {
-                            if let command { remote.send(command) }
-                        } label: {
-                            Text(label)
-                                .frame(maxWidth: .infinity, minHeight: 48)
+                Section("方向键") {
+                    VStack(spacing: 8) {
+                        tvKey("上")
+                        HStack(spacing: 8) {
+                            tvKey("左")
+                            tvKey("确认")
+                            tvKey("右")
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(command == nil || !remote.canSend)
+                        tvKey("下")
+                    }
+                    HStack(spacing: 8) {
+                        tvKey("返回")
+                        tvKey("菜单")
                     }
                 }
-                .padding(.vertical, 8)
+                Section("音量和频道") {
+                    HStack(spacing: 12) {
+                        VStack(spacing: 8) {
+                            tvKey("音量加")
+                            tvKey("音量减")
+                        }
+                        VStack(spacing: 8) {
+                            tvKey("频道加")
+                            tvKey("频道减")
+                        }
+                    }
+                }
+            } else {
+                AirConditionerPanel()
             }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func tvKey(_ label: String) -> some View {
+        let command = canTestSet ? RemoteCommand(rawValue: label) : nil
+        return Button {
+            if let command { remote.send(command) }
+        } label: {
+            Text(label)
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .disabled(command == nil || !remote.canSend)
+    }
+}
+
+private struct AirConditionerPanel: View {
+    @State private var power = false
+    @State private var mode = "制冷"
+    @State private var temperature = 26
+    @State private var fanSpeed = "自动"
+    @State private var swing = false
+
+    private let modes = ["自动", "制冷", "制热", "除湿", "送风"]
+    private let fanSpeeds = ["自动", "低", "中", "高"]
+
+    var body: some View {
+        Section {
+            HStack {
+                Text("\(temperature)°C")
+                    .font(.system(size: 44, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .accessibilityLabel("\(temperature) 摄氏度")
+                Spacer()
+                VStack(alignment: .trailing) {
+                    Text(power ? "开机" : "关机")
+                    Text("\(mode) · 风速\(fanSpeed)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Toggle("电源", isOn: $power)
+            HStack(spacing: 12) {
+                Button("温度减") { temperature -= 1 }
+                    .disabled(temperature == 16)
+                    .frame(maxWidth: .infinity)
+                Button("温度加") { temperature += 1 }
+                    .disabled(temperature == 30)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            Picker("模式", selection: $mode) {
+                ForEach(modes, id: \.self) { Text($0) }
+            }
+            Picker("风速", selection: $fanSpeed) {
+                ForEach(fanSpeeds, id: \.self) { Text($0) }
+            }
+            Toggle("扫风", isOn: $swing)
+        } header: {
+            Text("空调遥控器 · 布局预览")
+        } footer: {
+            Text("这里的操作只改变面板上的预览状态。空调码组仍待适配 FS01。")
+        }
     }
 }
 
@@ -415,33 +483,6 @@ enum RemoteCommand: String, CaseIterable, Identifiable {
     }
 }
 
-private enum PacketProbe: String, CaseIterable, Identifiable {
-    case zeroTag = "实验 A · 标记归零"
-    case borrowedTag = "实验 B · 换用静音标记"
-    case swappedTag = "实验 C · 交换标记字节"
-
-    var id: Self { self }
-
-    var payload: Data {
-        var packet = RemoteCommand.volumeUp.payload
-        // Keep the captured IR body intact while testing the two unknown header bytes.
-        switch self {
-        case .zeroTag:
-            packet[2] = 0
-            packet[3] = 0
-        case .borrowedTag:
-            let mute = RemoteCommand.mute.payload
-            packet[2] = mute[2]
-            packet[3] = mute[3]
-        case .swappedTag:
-            let first = packet[2]
-            packet[2] = packet[3]
-            packet[3] = first
-        }
-        return packet
-    }
-}
-
 final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let deviceName = "IR2023_"
     private let serviceID = CBUUID(string: "FFF0")
@@ -451,7 +492,7 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     @Published private(set) var lastResult: String?
     @Published private(set) var bluetoothReady = false
     @Published private(set) var ready = false
-    @Published private var pending: String?
+    @Published private var pending: RemoteCommand?
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -487,17 +528,14 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     }
 
     func send(_ command: RemoteCommand) {
-        send(payload: command.payload, label: command.rawValue)
-    }
-
-    func send(payload: Data, label: String) {
         guard canSend, let peripheral, let commandCharacteristic else { return }
+        let payload = command.payload
         guard payload.count <= peripheral.maximumWriteValueLength(for: .withResponse) else {
             lastResult = "蓝牙连接允许的写入长度不足。"
             return
         }
-        pending = label
-        lastResult = "正在发送：\(label)"
+        pending = command
+        lastResult = "正在发送：\(command.rawValue)"
         peripheral.writeValue(payload, for: commandCharacteristic, type: .withResponse)
     }
 
@@ -585,7 +623,7 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         guard self.peripheral === peripheral, characteristic === commandCharacteristic, let pending else { return }
         self.pending = nil
-        lastResult = error?.localizedDescription ?? "已写入：\(pending)"
+        lastResult = error?.localizedDescription ?? "已写入：\(pending.rawValue)"
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
