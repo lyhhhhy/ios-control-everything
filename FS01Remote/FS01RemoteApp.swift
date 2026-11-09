@@ -10,18 +10,14 @@ struct FS01RemoteApp: App {
         WindowGroup {
             NavigationStack {
                 List {
-                    if let catalog = InfraredCatalog.entries {
-                        ForEach(catalog.keys.sorted(), id: \.self) { category in
-                            NavigationLink {
-                                BrandList(category: category, brands: catalog[category] ?? [:], remote: remote)
-                            } label: {
-                                Label(InfraredCatalog.title(for: category), systemImage: category == "TVs" ? "tv" : "remote")
-                            }
+                    ForEach(ApplianceType.allCases) { type in
+                        NavigationLink {
+                            BrandList(type: type, brands: InfraredCatalog.entries?[type.rawValue] ?? [:], remote: remote)
+                        } label: {
+                            Label(type.title, systemImage: type == .television ? "tv" : "snowflake")
                         }
-                    } else {
-                        NavigationLink("电视") {
-                            BrandList(category: "TVs", brands: [:], remote: remote)
-                        }
+                    }
+                    if InfraredCatalog.entries == nil {
                         Text("公开码库目录读取失败。")
                     }
                 }
@@ -31,121 +27,133 @@ struct FS01RemoteApp: App {
     }
 }
 
+private enum ApplianceType: String, CaseIterable, Identifiable {
+    case television = "TVs"
+    case airConditioner = "ACs"
+
+    var id: Self { self }
+    var title: String { self == .television ? "电视" : "空调" }
+
+    var buttons: [String] {
+        switch self {
+        case .television:
+            ["电源", "信号源", "静音", "音量加", "频道加", "菜单", "音量减", "频道减", "返回"]
+        case .airConditioner:
+            ["电源", "模式", "风速", "温度加", "温度减", "扫风"]
+        }
+    }
+}
+
 private enum InfraredCatalog {
     typealias Brands = [String: [String]]
-    static let revision = "c33f37e6f75836b5d1894a95c04778d93bae51e7"
+
     static let entries: [String: Brands]? = {
         guard let url = Bundle.main.url(forResource: "InfraredCatalog", withExtension: "json"),
               let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode([String: Brands].self, from: data)
     }()
 
-    static func title(for category: String) -> String {
-        let names = [
-            "ACs": "空调", "TVs": "电视", "Air_Purifiers": "空气净化器", "Fans": "风扇",
-            "Cable_Boxes": "机顶盒", "DVD_Players": "DVD 播放器", "Blu-Ray": "蓝光播放器",
-            "Cameras": "相机", "Projectors": "投影仪", "Audio_and_Video_Receivers": "功放",
-            "Humidifiers": "加湿器", "Heaters": "电暖器", "Vacuum_Cleaners": "吸尘器与扫地机器人",
-            "LED_Lighting": "灯具", "SoundBars": "条形音响", "Streaming_Devices": "流媒体播放器"
+    static func brandName(_ brand: String) -> String {
+        let translations = [
+            "Samsung": "三星", "Sony": "索尼", "Panasonic": "松下", "Sharp": "夏普",
+            "Hisense": "海信", "Toshiba": "东芝", "Philips": "飞利浦", "Skyworth": "创维",
+            "Xiaomi": "小米", "Haier": "海尔", "Gree": "格力", "Midea": "美的",
+            "Daikin": "大金", "Hitachi": "日立", "Fujitsu": "富士通", "Mitsubishi": "三菱",
+            "AUX": "奥克斯", "Changhong": "长虹", "Konka": "康佳", "TCL": "TCL", "LG": "LG"
         ]
-        return names[category] ?? display(category)
-    }
-
-    static func display(_ value: String) -> String {
-        value.replacingOccurrences(of: "_", with: " ")
-    }
-
-    static func source(category: String, brand: String, model: String) -> URL {
-        URL(string: "https://github.com/UberGuidoZ/Flipper-IRDB/blob/\(revision)")!
-            .appendingPathComponent(category)
-            .appendingPathComponent(brand)
-            .appendingPathComponent(model + ".ir")
+        return translations[brand] ?? brand.replacingOccurrences(of: "_", with: " ")
     }
 }
 
 private struct BrandList: View {
-    let category: String
+    let type: ApplianceType
     let brands: InfraredCatalog.Brands
     @ObservedObject var remote: FS01Remote
     @State private var query = ""
 
     var body: some View {
         List {
-            if category == "TVs", query.isEmpty {
+            if type == .television, query.isEmpty {
                 Section("可以控制") {
                     NavigationLink("已验证的电视") {
-                        VerifiedTVRemote(remote: remote)
+                        RemotePad(type: type, title: "已验证的电视", setCount: 1, verified: true, remote: remote)
                     }
                 }
             }
-            Section("公开码库 · 待适配") {
+            Section("品牌") {
                 ForEach(brands.keys.sorted().filter {
-                    query.isEmpty || InfraredCatalog.display($0).localizedCaseInsensitiveContains(query)
+                    query.isEmpty || $0.localizedCaseInsensitiveContains(query)
+                        || InfraredCatalog.brandName($0).localizedCaseInsensitiveContains(query)
                 }, id: \.self) { brand in
-                    NavigationLink(InfraredCatalog.display(brand)) {
-                        if let models = brands[brand] {
-                            if models.count == 1, let model = models.first {
-                                CatalogRemote(category: category, brand: brand, model: model)
-                            } else {
-                                List(models, id: \.self) { model in
-                                    NavigationLink(InfraredCatalog.display(model)) {
-                                        CatalogRemote(category: category, brand: brand, model: model)
-                                    }
-                                }
-                                .navigationTitle("选择型号")
-                            }
-                        }
+                    NavigationLink(InfraredCatalog.brandName(brand)) {
+                        RemotePad(
+                            type: type,
+                            title: InfraredCatalog.brandName(brand),
+                            setCount: brands[brand]?.count ?? 0,
+                            verified: false,
+                            remote: remote
+                        )
                     }
                 }
             }
         }
         .searchable(text: $query, prompt: "搜索品牌")
-        .navigationTitle(InfraredCatalog.title(for: category) + " · 选择品牌")
+        .navigationTitle("选择\(type.title)品牌")
     }
 }
 
-private struct CatalogRemote: View {
-    let category: String
-    let brand: String
-    let model: String
-
-    var body: some View {
-        List {
-            LabeledContent("品牌", value: InfraredCatalog.display(brand))
-            LabeledContent("型号", value: InfraredCatalog.display(model))
-            Section("发码状态") {
-                Text("公开码库已有此型号。FS01 的指令转换尚未验证，此型号暂时无法控制。")
-                Link("查看原始红外码", destination: InfraredCatalog.source(category: category, brand: brand, model: model))
-            }
-        }
-        .navigationTitle("遥控器")
-    }
-}
-
-private struct VerifiedTVRemote: View {
+private struct RemotePad: View {
+    let type: ApplianceType
+    let title: String
+    let setCount: Int
+    let verified: Bool
     @ObservedObject var remote: FS01Remote
+    @State private var selectedSet = 0
 
     var body: some View {
         List {
-            Section("红外发射器") {
-                LabeledContent("设备", value: "FS01")
-                LabeledContent("状态", value: remote.connectionStatus)
-                Button("搜索并连接", action: remote.connect)
-                    .disabled(!remote.canConnect)
-                if let result = remote.lastResult {
-                    Text(result)
-                        .font(.footnote)
+            Section("码组") {
+                LabeledContent("当前", value: setCount == 0 ? "无" : "\(selectedSet + 1) / \(setCount)")
+                Button("下一套") {
+                    selectedSet = (selectedSet + 1) % setCount
+                }
+                .disabled(setCount < 2)
+                if !verified {
+                    Text("此品牌的码组尚未适配 FS01，暂时只能切换预览。")
                         .foregroundStyle(.secondary)
                 }
             }
-            Section("电视") {
-                ForEach(RemoteCommand.allCases) { command in
-                    Button(command.rawValue) { remote.send(command) }
-                        .disabled(!remote.canSend)
+            if verified {
+                Section("红外发射器") {
+                    LabeledContent("状态", value: remote.connectionStatus)
+                    Button("搜索并连接", action: remote.connect)
+                        .disabled(!remote.canConnect)
+                    if let result = remote.lastResult {
+                        Text(result)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            Section("遥控按键") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
+                    ForEach(type.buttons, id: \.self) { label in
+                        let command = verified ? RemoteCommand(rawValue: label) : nil
+                        Button {
+                            if let command { remote.send(command) }
+                        } label: {
+                            Text(label)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(command == nil || !remote.canSend)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
         }
-        .navigationTitle("电视遥控")
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
