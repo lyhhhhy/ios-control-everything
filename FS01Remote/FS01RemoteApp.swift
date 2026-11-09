@@ -331,6 +331,18 @@ private struct RemotePad: View {
                     }
                 }
             }
+            if canTestSet {
+                Section("发码实验 · 每次预期音量加") {
+                    Text("先用正常的音量加确认连接，再分别试 A、B、C。每次看电视音量有没有升高。")
+                        .font(.footnote)
+                    ForEach(PacketProbe.allCases) { probe in
+                        Button(probe.rawValue) {
+                            remote.send(payload: probe.payload, label: probe.rawValue)
+                        }
+                        .disabled(!remote.canSend)
+                    }
+                }
+            }
             Section("遥控按键") {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
                     ForEach(type.buttons, id: \.self) { label in
@@ -403,6 +415,33 @@ enum RemoteCommand: String, CaseIterable, Identifiable {
     }
 }
 
+private enum PacketProbe: String, CaseIterable, Identifiable {
+    case zeroTag = "实验 A · 标记归零"
+    case borrowedTag = "实验 B · 换用静音标记"
+    case swappedTag = "实验 C · 交换标记字节"
+
+    var id: Self { self }
+
+    var payload: Data {
+        var packet = RemoteCommand.volumeUp.payload
+        // Keep the captured IR body intact while testing the two unknown header bytes.
+        switch self {
+        case .zeroTag:
+            packet[2] = 0
+            packet[3] = 0
+        case .borrowedTag:
+            let mute = RemoteCommand.mute.payload
+            packet[2] = mute[2]
+            packet[3] = mute[3]
+        case .swappedTag:
+            let first = packet[2]
+            packet[2] = packet[3]
+            packet[3] = first
+        }
+        return packet
+    }
+}
+
 final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let deviceName = "IR2023_"
     private let serviceID = CBUUID(string: "FFF0")
@@ -412,7 +451,7 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     @Published private(set) var lastResult: String?
     @Published private(set) var bluetoothReady = false
     @Published private(set) var ready = false
-    @Published private var pending: RemoteCommand?
+    @Published private var pending: String?
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -448,14 +487,17 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     }
 
     func send(_ command: RemoteCommand) {
+        send(payload: command.payload, label: command.rawValue)
+    }
+
+    func send(payload: Data, label: String) {
         guard canSend, let peripheral, let commandCharacteristic else { return }
-        let payload = command.payload
         guard payload.count <= peripheral.maximumWriteValueLength(for: .withResponse) else {
             lastResult = "蓝牙连接允许的写入长度不足。"
             return
         }
-        pending = command
-        lastResult = "正在发送：\(command.rawValue)"
+        pending = label
+        lastResult = "正在发送：\(label)"
         peripheral.writeValue(payload, for: commandCharacteristic, type: .withResponse)
     }
 
@@ -543,7 +585,7 @@ final class FS01Remote: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         guard self.peripheral === peripheral, characteristic === commandCharacteristic, let pending else { return }
         self.pending = nil
-        lastResult = error?.localizedDescription ?? "已写入：\(pending.rawValue)"
+        lastResult = error?.localizedDescription ?? "已写入：\(pending)"
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
