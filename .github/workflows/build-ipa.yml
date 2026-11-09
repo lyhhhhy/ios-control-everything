@@ -36,7 +36,7 @@ jobs:
           app="$RUNNER_TEMP/fs01-build/Build/Products/Release-iphoneos/FS01Remote.app"
           test -x "$app/FS01Remote"
           /usr/libexec/PlistBuddy -c 'Print :NSBluetoothAlwaysUsageDescription' "$app/Info.plist"
-          lipo -verify_arch arm64 "$app/FS01Remote"
+          lipo "$app/FS01Remote" -verify_arch arm64
           mkdir -p dist/Payload
           ditto "$app" dist/Payload/FS01Remote.app
           cd dist
